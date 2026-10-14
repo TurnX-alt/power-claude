@@ -1,4 +1,4 @@
-import { intro, outro, confirm, multiselect, log, spinner, isCancel } from '@clack/prompts';
+import { intro, outro, multiselect, log, spinner, isCancel } from '@clack/prompts';
 import pc from 'picocolors';
 import { platform } from 'node:os';
 import { parseArgs } from 'node:util';
@@ -22,7 +22,7 @@ import {
 } from './terminal/macos.js';
 import { applyClaudeTheme } from './claude-settings.js';
 import { getPowerClaudeBackground } from './theme.js';
-import { findClaudeBinary, isClaudeProcessRunning, killAllClaudeProcesses, patchAgentsMdBinary } from './patch-agents-md.js';
+import { trustAllWorkspaces } from './trust-workspace.js';
 import type { ClaudeInstallation, ClaudeInstallSource } from './claude-installation.js';
 
 // ── CLI 参数 ──
@@ -62,10 +62,10 @@ const POWERCLAUDE_DIR = join(homedir(), '.powerclaude');
 
 // ── 功能键与执行结果 ──
 
-type FeatureKey = 'terminal-theme' | 'claude-theme' | 'system-prompt' | 'patch-agents-md';
+type FeatureKey = 'terminal-theme' | 'claude-theme' | 'system-prompt' | 'trust-workspace';
 
-/** 固定执行顺序（依赖链）：终端主题 → Claude 主题 → System Prompt → 二进制补丁 */
-const FEATURE_ORDER: FeatureKey[] = ['terminal-theme', 'claude-theme', 'system-prompt', 'patch-agents-md'];
+/** 固定执行顺序（依赖链）：终端主题 → Claude 主题 → System Prompt → 信任工作区 */
+const FEATURE_ORDER: FeatureKey[] = ['terminal-theme', 'claude-theme', 'system-prompt', 'trust-workspace'];
 
 interface ActionResult {
   step: FeatureKey;
@@ -291,9 +291,9 @@ async function showOptionMenu(): Promise<FeatureKey[]> {
       hint: 'PATH 拦截（wrapper.mjs + 启动器）',
     },
     {
-      value: 'patch-agents-md' as FeatureKey,
-      label: 'CLAUDE.md → AGENTS.md 二进制补丁',
-      hint: '修改 claude 二进制默认查找 AGENTS.md（需关闭 claude 进程）',
+      value: 'trust-workspace' as FeatureKey,
+      label: '信任所有工作区（~ 免信任弹窗）',
+      hint: '将主目录设为信任根，以后新文件夹不再提示 Quick safety check',
     },
   ];
 
@@ -338,7 +338,7 @@ const STEP_LABELS: Record<FeatureKey, string> = {
   'terminal-theme': '应用终端 Sakura Pink 主题',
   'claude-theme': '应用 Claude Code 主题',
   'system-prompt': '安装 System Prompt 定制',
-  'patch-agents-md': '应用 CLAUDE.md → AGENTS.md 补丁',
+  'trust-workspace': '设置工作区信任（~/.claude.json）',
 };
 
 /** 各功能执行器：返回成功消息；抛错由 runStep 统一转为失败结果 */
@@ -377,31 +377,18 @@ const EXECUTORS: Record<FeatureKey, FeatureExecutor> = {
     log.info(`  PATH 包装脚本: ${pathWrapper}`);
     return '🔧 System Prompt 定制: 已启用（PATH 拦截）';
   },
-  'patch-agents-md': async (_ctx, s) => {
-    const binary = findClaudeBinary();
-    if (!binary) {
-      return '⚠️ 未找到可 patch 的 claude 二进制（npm 安装的 claude.exe / 原生安装实体），已跳过';
-    }
-
-    // 进程占用检查：patch 需要独占写权限
-    if (isClaudeProcessRunning()) {
-      s.stop('检测到 claude 进程正在运行');
-      const kill = await confirm({
-        message: '补丁需要关闭所有 claude 进程（当前会话若在 claude 内运行也会被关闭），是否继续？',
-        initialValue: false,
-      });
-      if (isCancel(kill) || !kill) {
-        return '⚠️ 补丁跳过（用户未确认关闭 claude 进程）';
-      }
-      killAllClaudeProcesses();
-      s.start('应用 CLAUDE.md → AGENTS.md 补丁');
-    }
-
-    const hits = patchAgentsMdBinary(binary);
-    if (hits === 0) {
-      return `📝 CLAUDE.md → AGENTS.md: 已是补丁状态（无残留引用） — ${binary}`;
-    }
-    return `📝 CLAUDE.md → AGENTS.md: ${hits} 处已替换 — ${binary}`;
+  'trust-workspace': (_ctx, _s) => {
+    const result = trustAllWorkspaces();
+    if (!result) return '✅ 工作区信任：已就绪（无需操作）';
+    const parts: string[] = [];
+    parts.push(
+      result.homeTrusted
+        ? `✅ 工作区信任：已设 ${homedir().replace(/\\/g, '/')} 为信任根`
+        : '✅ 工作区信任：主目录已是信任根',
+    );
+    if (result.flippedCount > 0) parts.push(`${result.flippedCount} 个条目 false→true`);
+    if (result.warning) parts.push(result.warning);
+    return parts.join(' — ');
   },
 };
 
