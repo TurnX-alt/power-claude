@@ -43,7 +43,6 @@ PowerClaude —— 跨平台「终端 + Claude Code」樱花粉主题一键配�
 - `src/macos-terminal.ts` — macOS 安装编排（退出 Terminal → 刷新 cfprefsd → 调 Swift → 冷启动）
 - `src/macos-terminal.swift` — Swift 脚本：生成 .terminal 产物、合成背景图、构造 bookmark、直写偏好 plist
 - `src/claude-settings.ts` — Claude Code 主题写入与检测
-- `src/patch-agents-md.ts` — 二进制补丁：CLAUDE.md → AGENTS.md 5 组等长替换 + claude 进程检测/强杀 + 实体二进制定位
-- `scripts/e2e-multiselect.ts` — E2E 聚焦测试（patch 模块单测 + terminal-theme 执行链）
+- `src/trust-workspace.ts` — 信任工作区：直写 ~/.claude.json projects 信任字段 + claude 进程检测/警告
 - `public/` — 本机背景图素材目录（gitignored）
 - `docs/` — 项目文档（PRD / ARCHITECTURE / DECISIONS / specs）
