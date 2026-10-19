@@ -33,7 +33,9 @@ node-system.ts          com.apple.Terminal.plist
      ▲ ───────── theme.ts（共享：配色 / 终端主题 / Claude 主题 / profile 工厂 / 背景图查找）─────────▲
 
 trust-workspace.ts（独立：直写 ~/.claude.json projects 信任字段
-  → 备份 → 设 home 为信任根 → 翻已有 false→true → 进程检测警告）
+  → 备份 → 设 home 条目 → 翻已有 false→true → 进程检测警告）
+index.ts 包装脚本层（wrapper.mjs + trust-poke.mjs → ~/.powerclaude/
+  → 每次 claude 启动前把 cwd 的 git root 直写为已信任条目）
 
 public/（背景图源，gitignored）──拷贝──▶ ~/.claude/powerclaude-background.*
 ```
@@ -46,7 +48,7 @@ public/（背景图源，gitignored）──拷贝──▶ ~/.claude/powerclaud
 | `src/theme.ts` | 单一事实源：Sakura Pink 配色/主题定义、PowerClaude profile 工厂、背景图查找（路径可注入便于测试） |
 | `src/claude-installation.ts` | 跨平台 CLI 探测纯逻辑（native / npm / path 三来源），环境全注入、不启动 claude 进程 |
 | `src/node-system.ts` | 环境适配器：把真实进程环境组装成 DetectionEnvironment，传给 claude-installation |
-| `src/trust-workspace.ts` | 信任工作区：直写 `~/.claude.json` 的 `projects` 信任字段，备份 → 设 home 为信任根 → 翻已有 false→true → 进程检测警告 |
+| `src/trust-workspace.ts` | 信任工作区（存量清理）：直写 `~/.claude.json` 的 `projects` 信任字段，备份 → 设 home 条目 → 翻已有 false→true → 进程检测警告。对新目录的持续覆盖由 `index.ts` 生成的 `trust-poke.mjs` 承担 |
 | `src/terminal/windows.ts` | Windows 终端：settings.json 定位/读写/备份、profile 去重安装、主题应用、链路编排 |
 | `src/terminal/macos.ts` | macOS 编排：退出 Terminal → 刷新 cfprefsd → 调 Swift → defaults 设默认 → 冷启动 |
 | `src/terminal/macos.swift` | 生成 .terminal 产物；合成背景图（樱花粉底 + 18% 原图）；构造 security-scoped bookmark；`--plist` 直写偏好 |
@@ -64,7 +66,9 @@ public/（背景图源，gitignored）──拷贝──▶ ~/.claude/powerclaud
 - 主题定义流：`theme.ts` 常量 → Windows 写入 settings.json（scheme + themes + defaults）；macOS 由 Swift 编码进 profile；Claude 侧写 `themes/sakura-pink.json` + `theme: "custom:sakura-pink"`
 - 背景图流：`public/` 第一张图（按文件名序）→ 拷贝到 `~/.claude/powerclaude-background.<ext>` → Windows 直接作为 `backgroundImage`；macOS 由 Swift 合成为 `powerclaude-background-blended.png` 并构造 bookmark 指向
 - 备份流：Windows `settings.json.bak-<时间戳>` 同目录副本；macOS `defaults export` 到 `~/com.apple.Terminal.bak-<时间戳>.plist`
-- 信任流：`trust-workspace.ts` 读取 `~/.claude.json` → 备份时间戳副本 → 设 home 条目 `hasTrustDialogAccepted: true` → 遍历翻转已有 false 条目 → 写回（2 空格缩进）；全部已就绪时跳过（幂等）
+- 信任流（两层）：
+  - 存量清理：`trust-workspace.ts` 读取 `~/.claude.json` → 备份时间戳副本 → 设 home 条目 `hasTrustDialogAccepted: true` → 遍历翻转已有 false 条目 → 写回（2 空格缩进）；全部已就绪时跳过（幂等）
+  - 增量预注入：`index.ts` 生成 `~/.powerclaude/trust-poke.mjs`，由 `wrapper.mjs` 在每次 spawn claude 之前执行——把 cwd 的 git root（向上查找 `.git`，正斜杠规范化，无 git 时退化为 cwd）直写为已信任条目；已信任则不动文件（幂等），写入前留 `.powerclaude-bak` 滚动备份。根因：Claude Code 的祖先信任链会被 git root 边界截断，home 条目对 git 仓库不可达，只有直接条目（key = 正斜杠 git root）是每次启动实际查询的入口
 - 执行流：Phase 3 固定顺序「终端主题 → Claude 主题 → System Prompt → 信任工作区」——信任步骤放最后，仅写配置文件，无需独占权限
 
 ## 外部系统

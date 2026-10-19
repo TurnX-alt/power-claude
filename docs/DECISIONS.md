@@ -138,3 +138,22 @@
 - 为什么不选其他：只支持稳定版在真机上已证伪；动态推导无收益
 - 后果：双装（stable + Preview）机器默认写 stable（文档化行为）；E2E 新增「无配置 / 仅 Preview / 双装」三个回归场景；失败路径也纳入测试（进程退出即证据，挂死会触发测试超时）
 - 何时重新审视：出现「双装但要写 Preview」的真实需求，或 Windows Terminal 配置位置再次变化时
+
+## ADR-011：信任提示改由 wrapper 启动前预注入 git root 直写条目，放弃「home 信任根」单点方案
+
+- 日期：2026-10-19
+- 状态：已采纳
+- 背景：真机证伪——安装向导已把 `~` 写为信任条目且全部存量条目为 true，但进入任何新 git 仓库仍弹 Quick safety check。反编译 claude.exe（2.1.301）确认其信任判定链：直接条目 key 为正斜杠规范化的 git root（`Uje()`/`x2()`），祖先链查找（`Wm()`）被根边界硬性截断（`s===r || s.startsWith(r+"/")`），git 仓库内永远爬不到 home——「信任 home = 信任整个用户区」的语义对 git 仓库不成立
+- 考虑过的方案：
+  - 继续只写 home 条目：已被真机证伪，仅对无根边界的非 git 目录生效
+  - 安装时枚举 `~/Codes` 等目录下全部 git root 预写信任：覆盖不了未来新建的仓库
+  - 设置 `CLAUDE_CODE_SANDBOXED=1` 走 `NO()` 首行短路：属沙箱模式开关，会连带改变权限/网络等大量行为，风险不可控
+- 决策：
+  - `writeNodeWrapper` 同时落盘 `~/.powerclaude/trust-poke.mjs`；`wrapper.mjs` 在 spawn claude 之前 `await import` 它
+  - trust-poke 从 cwd 向上查找 `.git`（目录或文件均算）得到 git root，正斜杠规范化后直写 `~/.claude.json` 的 `projects[key].hasTrustDialogAccepted = true`；无 git 时退化写 cwd 自身（与 Claude 的 fallback key 一致）
+  - 幂等（已信任不动文件）、写入前留 `.powerclaude-bak` 滚动备份、任何异常静默退出不阻塞启动
+  - `trustAllWorkspaces` 保留：负责存量条目翻 true 与 home 条目（后者仍覆盖非 git 目录的祖先链场景）
+- 为什么选这个：wrapper 本就是本项目已有的启动必经拦截点，预注入发生在 claude 读配置之前，时序天然正确；对并发会话退出覆写免疫——下次启动总会补写
+- 为什么不选其他：见「考虑过的方案」；另因信任判定逻辑在混淆二进制中无公开契约，任何依赖内部行为的方案都需随版本重新验证
+- 后果：每次启动多一次同步文件读写（已信任时仅一次读 + 判断，开销可忽略）；E2E 覆盖 git 子目录 / 非 git 目录 / 幂等 / 字段保留 / 备份五类场景（USERPROFILE 重定向沙盒隔离）
+- 何时重新审视：Claude Code 更改信任字段名或 key 规范化规则（升级后复现弹窗）时
